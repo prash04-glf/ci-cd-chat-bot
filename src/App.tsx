@@ -9,6 +9,7 @@ import {
   Bot,
   Check,
   Clipboard,
+  KeyRound,
   LoaderCircle,
   MessageCircle,
   PanelLeft,
@@ -42,6 +43,7 @@ type GenerateContentResponse = {
 
 const MODEL_NAME = 'gemma-4-31b-it'
 const API_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent`
+const API_KEY_STORAGE_KEY = 'gemma-chat-api-key'
 
 const WELCOME_MESSAGE: ChatMessage = {
   id: 'welcome',
@@ -61,6 +63,14 @@ const createMessage = (role: MessageRole, text: string): ChatMessage => ({
   text,
 })
 
+const readStoredApiKey = () => {
+  try {
+    return window.localStorage.getItem(API_KEY_STORAGE_KEY)?.trim() ?? ''
+  } catch {
+    return ''
+  }
+}
+
 function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([WELCOME_MESSAGE])
   const [input, setInput] = useState('')
@@ -68,16 +78,34 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
-  const conversationEndRef = useRef<HTMLDivElement>(null)
+  const [savedApiKey, setSavedApiKey] = useState(() => readStoredApiKey())
+  const [apiKeyInput, setApiKeyInput] = useState('')
+  const [apiKeyDialogError, setApiKeyDialogError] = useState<string | null>(null)
+  const [isApiKeyDialogOpen, setIsApiKeyDialogOpen] = useState(
+    () => !import.meta.env.VITE_GEMINI_API_KEY?.trim() && !readStoredApiKey(),
+  )
+  const conversationRef = useRef<HTMLElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
+  const apiKeyInputRef = useRef<HTMLInputElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
 
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY?.trim()
+  const environmentApiKey = import.meta.env.VITE_GEMINI_API_KEY?.trim()
+  const apiKey = environmentApiKey || savedApiKey
   const isConfigured = Boolean(apiKey)
 
   useEffect(() => {
-    conversationEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const conversation = conversationRef.current
+
+    if (conversation) {
+      conversation.scrollTo({ top: conversation.scrollHeight, behavior: 'smooth' })
+    }
   }, [messages, isLoading])
+
+  useEffect(() => {
+    if (isApiKeyDialogOpen) {
+      apiKeyInputRef.current?.focus()
+    }
+  }, [isApiKeyDialogOpen])
 
   const handleReset = () => {
     abortControllerRef.current?.abort()
@@ -99,7 +127,9 @@ function App() {
     }
 
     if (!apiKey) {
-      setError('Add VITE_GEMINI_API_KEY to .env.local before sending a message.')
+      setApiKeyInput('')
+      setApiKeyDialogError(null)
+      setIsApiKeyDialogOpen(true)
       return
     }
 
@@ -187,6 +217,39 @@ function App() {
     composerRef.current?.focus()
   }
 
+  const handleOpenApiKeyDialog = () => {
+    setApiKeyInput(apiKey)
+    setApiKeyDialogError(null)
+    setIsApiKeyDialogOpen(true)
+  }
+
+  const handleSaveApiKey = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const trimmedApiKey = apiKeyInput.trim()
+
+    if (!trimmedApiKey) {
+      setApiKeyDialogError('Paste a Google AI Studio API key to continue.')
+      return
+    }
+
+    try {
+      window.localStorage.setItem(API_KEY_STORAGE_KEY, trimmedApiKey)
+    } catch {
+    }
+
+    setSavedApiKey(trimmedApiKey)
+    setApiKeyDialogError(null)
+    setIsApiKeyDialogOpen(false)
+    setError(null)
+    composerRef.current?.focus()
+  }
+
+  const handleApiKeyDialogKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape') {
+      setIsApiKeyDialogOpen(false)
+    }
+  }
+
   return (
     <div className="app-shell">
       <aside className={`sidebar ${isSidebarOpen ? 'is-open' : ''}`}>
@@ -265,10 +328,24 @@ function App() {
               <strong>New conversation</strong>
             </div>
           </div>
-          <button type="button" className="clear-button" onClick={handleReset}>
-            <Trash2 size={16} />
-            <span>Clear</span>
-          </button>
+          <div className="topbar-actions">
+            {!environmentApiKey && (
+              <button
+                type="button"
+                className="api-key-button"
+                onClick={handleOpenApiKeyDialog}
+                aria-label={isConfigured ? 'Manage API key' : 'Add API key'}
+                title={isConfigured ? 'Manage API key' : 'Add API key'}
+              >
+                <KeyRound size={15} />
+                <span>{isConfigured ? 'API key' : 'Add API key'}</span>
+              </button>
+            )}
+            <button type="button" className="clear-button" onClick={handleReset}>
+              <Trash2 size={16} />
+              <span>Clear</span>
+            </button>
+          </div>
         </header>
 
         <main className="chat-panel">
@@ -286,7 +363,12 @@ function App() {
             </div>
           </section>
 
-          <section className="conversation" aria-live="polite" aria-label="Conversation">
+          <section
+            ref={conversationRef}
+            className="conversation"
+            aria-live="polite"
+            aria-label="Conversation"
+          >
             {messages.map((message) => (
               <article key={message.id} className={`message message-${message.role}`}>
                 <div className="message-avatar" aria-hidden="true">
@@ -341,7 +423,7 @@ function App() {
                 </button>
               </div>
             )}
-            <div ref={conversationEndRef} />
+            <div />
           </section>
 
           {messages.length === 1 && !isLoading && (
@@ -387,6 +469,70 @@ function App() {
           <p className="disclaimer">Gemma may make mistakes. Check important information.</p>
         </main>
       </div>
+
+      {isApiKeyDialogOpen && (
+        <div className="api-key-overlay" onKeyDown={handleApiKeyDialogKeyDown}>
+          <section
+            className="api-key-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="api-key-dialog-title"
+            aria-describedby="api-key-dialog-description"
+          >
+            <div className="api-key-dialog-header">
+              <div className="api-key-dialog-icon" aria-hidden="true">
+                <KeyRound size={19} />
+              </div>
+              <button
+                type="button"
+                className="icon-button api-key-dialog-close"
+                onClick={() => setIsApiKeyDialogOpen(false)}
+                aria-label="Close API key dialog"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <h2 id="api-key-dialog-title">Connect Google AI Studio</h2>
+            <p id="api-key-dialog-description">
+              Add your API key to start chatting with Gemma. It stays in this browser and is sent
+              directly to Google AI Studio.
+            </p>
+            <form className="api-key-form" onSubmit={handleSaveApiKey}>
+              <label htmlFor="api-key-input">Google AI Studio API key</label>
+              <input
+                ref={apiKeyInputRef}
+                id="api-key-input"
+                type="password"
+                value={apiKeyInput}
+                onChange={(event) => setApiKeyInput(event.target.value)}
+                placeholder="Paste your API key"
+                autoComplete="off"
+                spellCheck={false}
+                aria-invalid={Boolean(apiKeyDialogError)}
+                aria-describedby={apiKeyDialogError ? 'api-key-dialog-error' : undefined}
+              />
+              {apiKeyDialogError && (
+                <p id="api-key-dialog-error" className="api-key-dialog-error" role="alert">
+                  {apiKeyDialogError}
+                </p>
+              )}
+              <div className="api-key-dialog-actions">
+                <button
+                  type="button"
+                  className="api-key-cancel"
+                  onClick={() => setIsApiKeyDialogOpen(false)}
+                >
+                  Not now
+                </button>
+                <button type="submit" className="api-key-submit">
+                  <Check size={16} />
+                  Save API key
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
     </div>
   )
 }

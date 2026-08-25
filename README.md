@@ -11,6 +11,8 @@ A frontend-only React chat interface for Google AI Studio's `gemma-4-31b-it` mod
 
 The app uses the `generateContent` endpoint and sends the full conversation history with each message. `npm run build` creates a production bundle and `npm run lint` runs Oxlint.
 
+If `VITE_GEMINI_API_KEY` is not available at build time, the app opens an API-key dialog when it loads. A key entered there is stored in that browser and can be updated from the `API key` control in the top bar. A build-time environment key takes precedence, so the dialog does not appear when `.env`, `.env.local`, or the deployment environment already supplies `VITE_GEMINI_API_KEY`.
+
 ## GitHub Pages
 
 The `Deploy to GitHub Pages` workflow runs on pushes to `main`. Before the first deployment:
